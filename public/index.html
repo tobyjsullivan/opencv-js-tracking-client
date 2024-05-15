@@ -42,7 +42,85 @@
         mat.delete();
       };
 
-      async function main() {
+      function trackObjects() {
+        const width = 640,
+          height = 480;
+
+        // Default to a 200x200 square in the centre of the frame
+        let initBB = {
+          x: width / 2 - 100,
+          y: height / 2 - 100,
+          width: 200,
+          height: 200,
+        };
+        const tracker = new cv.TrackerMIL();
+
+        const $video = document.getElementById("video");
+        if ($video === null) {
+          throw new Error(`Could not find video element.`);
+        }
+
+        /** @type {HTMLCanvasElement | null} */
+        let $canvas = document.getElementById("canvasOutput");
+        if ($canvas === null) {
+          throw new Error(`Cannot find canvas element`);
+        }
+
+        /** @type {cv.VideoCapture | null} */
+        let vs = null;
+        $video.addEventListener("play", () => {
+          vs = new cv.VideoCapture($video);
+          console.log(`[trackObjects] opencv video stream:`, vs);
+        });
+
+        let frame = new cv.Mat($video.height, $video.width, cv.CV_8UC4);
+        function processInitialFrame() {
+          if (vs === null || initBB === null) {
+            // Retry next frame
+            $video.requestVideoFrameCallback(processInitialFrame);
+            return;
+          }
+
+          vs.read(frame);
+          tracker.init(frame, initBB);
+          $video.requestVideoFrameCallback(processVideoFrame);
+        }
+        function doProcessFrame() {
+          if (vs === null || initBB === null) {
+            return;
+          }
+
+          vs.read(frame);
+          const [success, box] = tracker.update(frame);
+          if (!success) {
+            console.warn(`[doProcessFrame] tracker update failed`);
+            return;
+          }
+
+          const { x, y, width, height } = box;
+          cv.rectangle(
+            frame,
+            { x, y },
+            { x: x + width, y: y + height },
+            [0, 255, 0, 255],
+            2
+          );
+
+          // Draw frame to canvas
+          cv.imshow($canvas, frame);
+        }
+        function processVideoFrame(now, metadata) {
+          doProcessFrame();
+
+          // Re-register for next frame
+          $video.requestVideoFrameCallback(processVideoFrame);
+        }
+
+        $video.requestVideoFrameCallback(processInitialFrame);
+      }
+
+      // Capture the <video> window and replicate frames to a canvas.
+      function replicateToCanvas() {
         /** @type {HTMLVideoElement | null} */
         const $video = document.getElementById("video");
         if ($video === null) {
@@ -51,21 +129,15 @@
 
         /** @type {HTMLCanvasElement | null} */
         let $canvas = document.getElementById("canvasOutput");
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-
-        $video.srcObject = stream;
-
-        // Capture the <video> window and replicate frames to a canvas.
+        if ($canvas === null) {
+          throw new Error(`Cannot find canvas element`);
+        }
 
         /** @type {cv.VideoCapture | null} */
         let vs = null;
         $video.addEventListener("play", () => {
           vs = new cv.VideoCapture($video);
-          console.log(`opencv video stream:`, vs);
+          console.log(`[main] opencv video stream:`, vs);
         });
 
         let dstFrame = new cv.Mat($video.height, $video.width, cv.CV_8UC4);
@@ -80,6 +152,24 @@
           $video.requestVideoFrameCallback(replicateVideoFrame);
         }
         $video.requestVideoFrameCallback(replicateVideoFrame);
+      }
+
+      async function main() {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+
+        /** @type {HTMLVideoElement | null} */
+        const $video = document.getElementById("video");
+        if ($video === null) {
+          throw new Error(`Could not find video element.`);
+        }
+
+        $video.srcObject = stream;
+
+        // replicateToCanvas();
+        trackObjects();
       }
 
       main();
